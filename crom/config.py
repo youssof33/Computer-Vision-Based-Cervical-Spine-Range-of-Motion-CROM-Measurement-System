@@ -28,6 +28,17 @@ FACE_LOST_TIMEOUT_S = 0.4
 # Frames averaged to build the neutral reference.
 CALIBRATION_FRAMES = 12
 
+# Degrees of change between frames above which the head is shown as "MOVING".
+# Display only - it never gates a measurement.
+MOVE_THRESHOLD_DEG = 0.5
+# Frames used for the face-detection rate shown in the panel.
+FACE_HISTORY = 60
+
+# Guided protocol: hold the end range this long before the step auto-advances,
+# and ignore steps where the patient never moved past this angle.
+PROTOCOL_HOLD_S = 1.2
+PROTOCOL_MIN_DEG = 5.0
+
 # Raw angle -> clinical channel signs (positive = the movement named on the right).
 # Flip a value if the app reports the opposite side / direction.
 PITCH_SIGN = 1    # + pitch = looking down  -> Flexion

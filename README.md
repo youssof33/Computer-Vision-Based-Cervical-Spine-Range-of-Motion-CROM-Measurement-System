@@ -16,15 +16,29 @@ rotation — in degrees, **relative to a calibrated neutral position**.
 
 | Step | Behaviour |
 |---|---|
-| 1 | Live webcam feed with face-mesh overlay |
+| 1 | Live webcam feed with face-mesh overlay, FPS and face-detection rate |
 | 2 | **Calibrate** records the patient's neutral forward-facing pose as 0° |
 | 3 | **Start** begins the assessment; every frame updates six movement channels |
 | 4 | The peak (maximum) angle reached in each direction is tracked live |
-| 5 | **Record** snapshots the six peaks as a trial and starts a fresh set |
-| 6 | **Dashboard** shows all six movements; **Export** writes a CSV report |
+| 5 | **Record** snapshots the six peaks as a trial (peaks survive until the next Start) |
+| 6 | **Dashboard** shows all six movements, trial means and L/R symmetry |
+| 7 | **Export** writes a CSV report with patient/session metadata |
 
 Left/right and up/down are derived from a 3D rotation, not from 2D pixel motion
 of the nose.
+
+### Pro options
+
+| Option | What it does |
+|---|---|
+| `--guided` / `G` | Guided six-step protocol: prompts each movement, auto-advances after a 1.2 s hold at end range, `Space` skips a step |
+| `--patient ID` | Written into the CSV header (`# patient: P-001`) |
+| `--notes TEXT` | Free-text session notes in the CSV header |
+| `--swap-lr` | Flip left/right labels at runtime without editing the config |
+| `--no-mirror` / `M` | Show the raw camera preview instead of the mirrored selfie view |
+| `--camera N` | Choose the webcam when several are connected |
+| HOLD / MOVING | Live stability indicator (angular change per frame) |
+| L/R symmetry | `100% = equal sides`, computed per trial on the dashboard |
 
 ---
 
@@ -60,9 +74,10 @@ python tests/test_pose.py
 ## Run
 
 ```bat
-python main.py                 :: default camera
-python main.py --camera 1      :: second webcam
-python main.py --swap-lr       :: swap left/right labels
+python main.py                       :: default camera, free mode
+python main.py --guided              :: guided six-step protocol
+python main.py --patient P-001       :: tag the report
+python main.py --camera 1 --swap-lr  :: second webcam, swapped sides
 ```
 
 ### Controls (buttons or keys)
@@ -70,11 +85,14 @@ python main.py --swap-lr       :: swap left/right labels
 | Key | Action |
 |---|---|
 | `C` | Calibrate neutral position (0°) |
-| `S` | Start / stop assessment |
+| `S` | Start / stop assessment (Start also clears the peaks) |
 | `R` | Record the current peaks as a trial |
 | `X` | Reset calibration, peaks and trials |
 | `E` | Export CSV to `reports/` |
 | `D` | Open / close the results dashboard |
+| `G` | Toggle the guided protocol |
+| `Space` | Skip to the next protocol step |
+| `M` | Toggle preview mirroring |
 | `Q` / `Esc` | Quit |
 
 ### Assessment procedure
@@ -88,7 +106,12 @@ python main.py --swap-lr       :: swap left/right labels
    lateral flexion, right rotation, left rotation. Return to neutral between
    movements so the channels do not overlap.
 4. Press **Stop**. Review the six peaks, press **Record** to store the trial
-   (do this once per trial if you want several), then **Export CSV**.
+   (repeat Start → movements → Record for more trials), then **Export CSV**.
+
+With `--guided`, the panel shows one movement at a time with a progress bar and
+advances automatically once the end range has been held for 1.2 s (`Space` skips
+a step). That keeps the six movements in a fixed order and stops the operator
+from forgetting one.
 
 The live panel shows the current dominant movement so you can confirm each
 movement is being seen before it counts.
@@ -171,13 +194,19 @@ smoothing, which is small next to a typical 40–60° range but not negligible.
 ```
 # CROM research prototype - head-pose estimate, not a validated clinical measurement.
 # Angles in degrees, relative to the calibrated neutral position.
+# patient: P-001
+# date: 2026-11-21 14:32
+# camera: 0 at 1280x720
+# software: crom 0.1.0
+# notes: first session
 trial,timestamp,Flexion,Extension,Right lateral flexion,Left lateral flexion,Right rotation,Left rotation
 1,2026-11-21 14:32:05,48.2,51.7,32.4,30.9,63.1,66.8
 ```
 
 One row per recorded trial. If you export without recording, the current peaks
-are written as a single `current` row. The two `#` lines are the caveat that
-travels with the data; `pandas.read_csv(path, comment="#")` skips them.
+are written as a single `current` row. The `#` lines are the caveat and the
+session metadata that travel with the data; `pandas.read_csv(path, comment="#")`
+skips them.
 
 CSV only — a PDF report was not implemented (it would add a rendering
 dependency for no extra data).
@@ -190,9 +219,10 @@ dependency for no extra data).
 main.py              entry point
 run.bat              Windows one-click setup + run
 crom/
-  config.py          camera, smoothing, and the three sign constants
+  config.py          camera, smoothing, thresholds and the three sign constants
   pose.py            MediaPipe wrapper, rotation maths, calibration, smoothing
-  session.py         six channels, peaks, trials, CSV export
+  session.py         six channels, peaks, trials, symmetry, means, CSV export
+  protocol.py        guided six-step sequence and auto-advance rule
   ui.py              all OpenCV drawing (video tile, panel, dashboard)
   app.py             camera loop, buttons, keyboard, workflow
 tests/test_pose.py   assert-based self-check, no camera needed

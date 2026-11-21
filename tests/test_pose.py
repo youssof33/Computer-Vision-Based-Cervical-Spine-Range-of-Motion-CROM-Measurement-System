@@ -16,7 +16,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from crom.pose import as_rotation, euler_zyx_deg, relative_rotation  # noqa: E402
-from crom.session import MOVEMENTS, Session, channels, dominant  # noqa: E402
+from crom.protocol import STEPS, Protocol  # noqa: E402
+from crom.session import (  # noqa: E402
+    MOVEMENTS, Session, channels, dominant, means, symmetry,
+)
 
 
 def rot(axis: str, deg: float) -> np.ndarray:
@@ -93,12 +96,13 @@ def test_session_peaks_trials_export() -> None:
 
     row = s.record()
     assert row["trial"] == 1 and close(row["Flexion"], 35)
-    assert all(v == 0 for v in s.peaks.values()), "record() must start fresh peaks"
+    assert close(s.peaks["Flexion"], 35), "record() keeps the peaks on screen"
 
     with tempfile.TemporaryDirectory() as tmp:
-        path = s.export_csv(tmp)
+        path = s.export_csv(tmp, meta={"patient": "P-001"})
         text = path.read_text(encoding="utf-8")
         assert path.suffix == ".csv" and "Flexion" in text
+        assert "# patient: P-001" in text
         lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
         assert len(lines) == 2, lines  # header + one trial
 
@@ -107,10 +111,50 @@ def test_session_peaks_trials_export() -> None:
     print("ok  peaks, trials and CSV export")
 
 
+def test_symmetry_and_means() -> None:
+    assert symmetry({}) == {"Rotation": 0.0, "Lateral flexion": 0.0}
+    sym = symmetry({
+        "Left rotation": 60.0, "Right rotation": 45.0,
+        "Left lateral flexion": 30.0, "Right lateral flexion": 30.0,
+    })
+    assert close(sym["Rotation"], 75.0) and close(sym["Lateral flexion"], 100.0)
+
+    trials = [{m: 10.0 for m in MOVEMENTS}, {m: 20.0 for m in MOVEMENTS}]
+    avg = means(trials)
+    assert close(avg["Flexion"], 15.0) and close(avg["Left rotation"], 15.0)
+    assert close(means([])["Flexion"], 0.0)
+    print("ok  symmetry and trial means")
+
+
+def test_protocol_advances_on_held_end_range() -> None:
+    p = Protocol()
+    assert p.total == len(STEPS) == 6
+    assert p.step.movement == "Flexion"
+
+    ch = {m: 0.0 for m in MOVEMENTS}
+    ch["Flexion"] = 30.0
+    assert not p.update(ch, 0.0)   # reaching end range
+    assert not p.update(ch, 1.0)   # not held long enough yet
+    assert p.update(ch, 1.5)       # held >= 1.2 s -> advance
+    assert p.step.movement == "Extension"
+
+    neutral = {m: 0.0 for m in MOVEMENTS}
+    assert not p.update(neutral, 5.0), "a step with no movement must not advance"
+
+    p.reset()
+    for _ in range(p.total):
+        p.next()
+    assert p.done and p.step is None
+    assert not p.update(neutral, 99.0)
+    print("ok  guided protocol advances on a held end range")
+
+
 if __name__ == "__main__":
     test_euler_roundtrip()
     test_calibration_is_relative()
     test_matrix_cleanup()
     test_channels_and_signs()
     test_session_peaks_trials_export()
+    test_symmetry_and_means()
+    test_protocol_advances_on_held_end_range()
     print("\nAll self-checks passed.")

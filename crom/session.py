@@ -59,6 +59,27 @@ def dominant(ch: dict[str, float], threshold: float = 0.5) -> tuple[str, float]:
     return (name, ch[name]) if ch[name] >= threshold else ("Neutral", 0.0)
 
 
+def symmetry(values: dict[str, float]) -> dict[str, float]:
+    """Left/right symmetry in % (100 = equal sides) for rotation and lateral flexion."""
+    pairs = (
+        ("Rotation", "Left rotation", "Right rotation"),
+        ("Lateral flexion", "Left lateral flexion", "Right lateral flexion"),
+    )
+    out: dict[str, float] = {}
+    for name, left, right in pairs:
+        a, b = values.get(left, 0.0), values.get(right, 0.0)
+        larger = max(a, b)
+        out[name] = 0.0 if larger < 5.0 else 100.0 * (1.0 - abs(a - b) / larger)
+    return out
+
+
+def means(trials: list[dict]) -> dict[str, float]:
+    """Average of each movement across recorded trials."""
+    if not trials:
+        return {m: 0.0 for m in MOVEMENTS}
+    return {m: sum(t[m] for t in trials) / len(trials) for m in MOVEMENTS}
+
+
 @dataclass
 class Session:
     """One assessment. Peaks are the maximum reached since the last reset/record."""
@@ -74,14 +95,13 @@ class Session:
                 self.peaks[name] = value
 
     def record(self) -> dict:
-        """Snapshot the current peaks as a trial and start a fresh set of peaks."""
+        """Snapshot the current peaks as a trial. Peaks are cleared on the next Start."""
         row = {
             "trial": len(self.trials) + 1,
             "timestamp": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             **{m: round(self.peaks[m], 1) for m in MOVEMENTS},
         }
         self.trials.append(row)
-        self.reset_peaks()
         return row
 
     def reset_peaks(self) -> None:
@@ -107,8 +127,14 @@ class Session:
             }
         ]
 
-    def export_csv(self, directory: Path | str | None = None) -> Path:
-        """Write the summary table. One row per trial, one column per movement."""
+    def export_csv(
+        self, directory: Path | str | None = None, meta: dict[str, str] | None = None
+    ) -> Path:
+        """Write the summary table. One row per trial, one column per movement.
+
+        `meta` is written as leading `# key: value` lines so the report carries
+        the patient/session context (skip them with pandas `comment="#"`).
+        """
         out_dir = Path(directory or config.REPORTS_DIR)
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"crom_report_{_dt.datetime.now():%Y%m%d_%H%M%S}.csv"
@@ -116,6 +142,8 @@ class Session:
         with path.open("w", newline="", encoding="utf-8") as fh:
             fh.write("# CROM research prototype - head-pose estimate, not a validated clinical measurement.\n")
             fh.write("# Angles in degrees, relative to the calibrated neutral position.\n")
+            for key, value in (meta or {}).items():
+                fh.write(f"# {key}: {value}\n")
             writer = csv.DictWriter(fh, fieldnames=["trial", "timestamp", *MOVEMENTS])
             writer.writeheader()
             writer.writerows(self.rows())
